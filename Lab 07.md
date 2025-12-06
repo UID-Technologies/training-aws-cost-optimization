@@ -19,8 +19,6 @@ This is the **final and most important module** of the FinOps program.
 
 To keep the lab realistic but manageable:
 
-### You (trainer) will either:
-
 #### Option A
 
 Provide a **pre-built, expensive CloudFormation environment**.
