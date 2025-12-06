@@ -94,8 +94,8 @@ Create a baseline EC2 workload and learn to migrate it to Fargate and Fargate Sp
 
 * Name: `user-service-ec2-large`
 * Launch Type: EC2
-* CPU: **512**
-* Memory: **1024**
+* CPU: **512** or **.5 vCPU**
+* Memory: **1024**  or **1 GB**
 * Container:
 
   * Image: `public.ecr.aws/aws-containers/ecsdemo-nodejs:latest`
