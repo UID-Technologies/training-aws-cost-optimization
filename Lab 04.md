@@ -361,13 +361,18 @@ Remove blocking synchronous Lambda calls and replace them with **SQS → Lambda*
 Replace code:
 
 ```javascript
-exports.handler = async (event) => {
-    for (const record of event.Records) {
-        let total = 0;
-        for (let i = 0; i < 20_000_000; i++) { total += i; }
-        console.log("Task:", record.body, "Total:", total);
+// Node.js 24 ES Modules
+
+export const handler = async (event) => {
+  for (const record of event.Records) {
+    let total = 0;
+    for (let i = 0; i < 20000000; i++) {
+      total += i;
     }
+    console.log("Task:", record.body, "Total:", total);
+  }
 };
+
 ```
 
 Click **Deploy**
