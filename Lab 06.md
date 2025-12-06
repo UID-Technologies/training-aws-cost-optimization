@@ -1,357 +1,399 @@
-# **Module 6 — Compute Optimization: Advanced Real-World Scenarios**
 
-## **Scenario Context**
+# **Module 6 — Compute Optimization: Advanced Real Scenarios**
 
-Acado Corp runs a wide range of compute-intensive workloads on EC2 Auto Scaling Groups (ASGs), powering:
+### *(EC2, Auto Scaling, Predictive Scaling, Compute Optimizer, Automated Remediation)*
 
-* A high-throughput onboarding API
-* Several ETL and batch data processing workloads
-* Mixed-instance-family microservices
-* 24×7 analytics workloads with highly variable demand
+This module focuses on advanced compute optimization using real enterprise scenarios.
+Participants already know EC2 basics and standard Auto Scaling.
+Now they will learn how to:
 
-Recent FinOps review highlighted:
+* Reduce EC2 costs by 30–40% using predictive scaling
+* Identify rightsizing opportunities using Compute Optimizer
+* Implement automated remediation workflows (Lambda + EventBridge)
+* Validate cost savings using CloudWatch and Cost Explorer
 
-* **ASGs remain over-provisioned** during low traffic windows
-* Scaling policies are outdated (simple CPU-based rules)
-* CloudWatch alarms are conservative → slow scale-in
-* Instances are oversized with low CPU/Memory usage
-* Compute Optimizer recommendations haven't been implemented
-* No automation exists for periodic rightsizing
-
-### **Goal:**
-
-Achieve **30–45% cost reduction** via predictive scaling and automated rightsizing.
-
-This module includes **two hands-on labs** that simulate enterprise-grade compute optimization challenges.
+Every step is done from the **AWS Management Console**.
 
 ---
 
-# **Module Prerequisites**
+# **1. Module Overview**
 
-### **AWS Requirements**
+Participants will learn to:
 
-* IAM permissions:
-  `autoscaling:*`, `cloudwatch:*`, `compute-optimizer:*`, `ssm:*`, `ec2:*`, `lambda:*`
-* Auto Scaling Group already deployed
-* Application Load Balancer available
-* Compute Optimizer enabled
+* Analyze compute utilization patterns
+* Enable predictive scaling to match future demand
+* Interpret Compute Optimizer recommendations
+* Build automated, self-healing compute environments
+* Measure cost reductions using Cost Explorer
 
-### **Tools**
-
-* AWS CLI
-* CloudWatch console access
-* Ability to upload JSON files for scaling policies
+This module simulates real FinOps and cloud operations workflows.
 
 ---
 
-# **Initial Setup (Recommended)**
+# **2. Learning Objectives**
 
-Before starting the lab:
+### Predictive Scaling
 
-1. Identify an existing ASG such as `acado-api-asg`
-2. Confirm CloudWatch metrics exist for CPU, RequestCount, etc.
-3. Ensure the ASG has dynamic scaling disabled or minimized (to observe lab behavior clearly)
-4. Install CloudWatch Agent on EC2 if memory metrics are needed
+* Predict future CPU load
+* Scale out *before* load arrives
+* Prevent overprovisioning and reduce EC2 runtime cost
 
----
+### Compute Optimizer Rightsizing
 
-# **Lab 1 — Auto Scaling Deep Dive: Reduce Cost by 30% Using Predictive Scaling**
+* Detect oversized instances
+* Identify cost savings with recommended instance types
+* Validate findings via CloudWatch metrics
 
-## **Objective**
+### Automated Compute Remediation
 
-Configure **Predictive Scaling** so the Auto Scaling Group scales **before** traffic changes occur and scales **down** aggressively during low-traffic periods.
+* Create EventBridge rules for recommendations
+* Trigger Lambda to adjust launch templates
+* Automatically reduce scale-out capacity and instance size
 
-Predictive scaling uses **machine learning forecasting** from AWS to reduce compute over-allocation.
+### Cost Validation
 
----
-
-## **Lab Prerequisites**
-
-* An ASG connected to an ALB
-* Target tracking and dynamic policies disabled (or allowed to be replaced)
-* CloudWatch metrics for request count, CPU utilization, latency
-
----
-
-## **Step 1 — Identify an Over-Provisioned ASG**
-
-List ASGs:
-
-```bash
-aws autoscaling describe-auto-scaling-groups
-```
-
-Choose one (example):
-
-```
-acado-api-asg
-```
-
-Review CPU trends:
-
-```bash
-aws cloudwatch get-metric-statistics \
-  --metric-name CPUUtilization \
-  --namespace AWS/EC2 \
-  --period 300 \
-  --statistics Average \
-  --start-time 2025-01-01T00:00:00Z \
-  --end-time 2025-01-02T00:00:00Z
-```
-
-Typical findings:
-
-* Average CPU = **12–15%**
-* ASG min capacity = **5 instances**
-* Only **3 instances** required during peak
-
-➡ **Clear over-provisioning**.
+* Measure improvements in CPU utilization
+* Validate fewer running instance-hours
+* View cost reduction in Cost Explorer
 
 ---
 
-## **Step 2 — Enable Predictive Scaling**
+# **3. Prerequisites**
 
-Create predictive scaling configuration:
+### AWS Services Needed
 
-```bash
-aws autoscaling put-scaling-policy \
-  --auto-scaling-group-name acado-api-asg \
-  --policy-name predictive-scaling \
-  --policy-type PredictiveScaling \
-  --predictive-scaling-configuration file://predictive.json
-```
+* EC2
+* Auto Scaling
+* Compute Optimizer
+* CloudWatch
+* Lambda
+* EventBridge
+* IAM
 
-Example **predictive.json**:
+### Environment
 
-```json
-{
-  "MetricSpecifications": [
-    {
-      "TargetValue": 50,
-      "CustomizedLoadMetricSpecification": {
-        "MetricName": "RequestCount",
-        "Namespace": "AWS/ApplicationELB",
-        "Dimensions": [
-          { "Name": "LoadBalancer", "Value": "app/acado-lb" }
-        ],
-        "Statistic": "Sum"
-      }
-    }
-  ],
-  "Mode": "ForecastAndScale"
-}
-```
+* Windows OS
+* Web browser
+* AWS Console
 
-✔ ASG now uses **forecasted demand** for scaling.
-✔ Ideal for workloads with hourly or daily patterns.
+### Sample AMI
+
+* **Amazon Linux 2023** or **Amazon Linux 2**
 
 ---
 
-## **Step 3 — Add Target Tracking Scaling (Real-Time Reaction)**
+# **4. Initial Setup (Console Only)**
 
-Predictive scaling handles forecasting, but **moment-to-moment traffic** must still be managed.
+## Step 1 — Enable Compute Optimizer
 
-Apply target tracking:
+1. Go to **AWS Console → Compute Optimizer**
+2. Click **Enable**
+3. Confirm activation
 
-```bash
-aws autoscaling put-scaling-policy \
-  --auto-scaling-group-name acado-api-asg \
-  --policy-name target-tracking \
-  --policy-type TargetTrackingScaling \
-  --target-tracking-configuration file://targettracking.json
-```
-
-Example **targettracking.json**:
-
-```json
-{
-  "PredefinedMetricSpecification": {
-    "PredefinedMetricType": "ASGAverageCPUUtilization"
-  },
-  "TargetValue": 40
-}
-```
+Compute Optimizer begins analyzing instances (full data may take 12–24 hours, but Auto Scaling Lab workloads will accelerate data collection).
 
 ---
 
-## **Step 4 — Validate Scaling Behavior**
+## Step 2 — Create an Oversized Auto Scaling Group
 
-Check scaling events:
+Purpose: You intentionally create an *inefficient* ASG, so optimizations are visible.
 
-```bash
-aws autoscaling describe-scaling-activities \
-  --auto-scaling-group-name acado-api-asg
-```
+1. Go to **EC2 Console → Auto Scaling Groups → Create Auto Scaling Group**
+2. Create a **Launch Template**
 
-Expected behavior:
+   * Instance type: **t3.medium** (intentionally oversized)
+   * AMI: Amazon Linux
+   * Key pair: optional
+   * Security group: allow HTTP
+3. Create Auto Scaling Group
 
-* **4–6 AM off-peak:** ASG scales down from 5 → 2 instances
-* **Traffic spike at 9 AM:** ASG scales up **before** API traffic grows
-* Fewer surprise throttles / cold starts
-* Compute footprint reduced during low demand
+   * VPC: default
+   * Subnets: choose **at least 2 AZs**
+   * Desired capacity: **2**
+   * Minimum: **2**
+   * Maximum: **6**
+4. Scaling Policy
 
----
+   * Choose **Target Tracking Scaling Policy**
+   * Metric: **CPU Utilization**
+   * Target value: **50%**
 
-## **Expected Optimization Outcome**
-
-* **~35% off-peak cost reduction**
-* Predictive scaling eliminates manual tuning
-* Auto-provisioning ahead of load prevents latency issues
-* Efficient scaling across weekday/weekend patterns
-
----
-
-# **Lab 2 — Automated Compute Rightsizing Using Compute Optimizer + CloudWatch**
-
-## **Objective**
-
-Use **Compute Optimizer** to detect rightsizing opportunities, verify them with CloudWatch, and automate instance resizing using Lambda or SSM.
+This creates an ASG ready for optimization.
 
 ---
 
-## **Lab Prerequisites**
+# **LAB 1 — Auto Scaling Deep Dive with Predictive Scaling**
 
-* Compute Optimizer enabled
-* EC2 instances running for >14 days
-* IAM permissions for resizing EC2 instances
-* CloudWatch metrics available
+### Objective
 
----
-
-## **Step 1 — Enable Compute Optimizer (If Needed)**
-
-```bash
-aws compute-optimizer update-enrollment-status --status Active
-```
-
-Verify:
-
-```bash
-aws compute-optimizer get-enrollment-status
-```
+Enable Predictive Scaling to proactively scale EC2 instances based on forecasted demand.
 
 ---
 
-## **Step 2 — Fetch Rightsizing Recommendations**
+## Step 1 — Prepare Time-Series CPU Patterns
 
-```bash
-aws compute-optimizer get-ec2-instance-recommendations > reco.json
-```
+Predictive scaling needs variation in load to learn patterns.
 
-Inspect sample output:
+In real enterprise systems this data already exists.
+For the lab, your ASG will naturally create baseline utilization over time.
+You do **not** need to generate workload manually.
 
-```json
-"currentInstanceType": "m5.4xlarge",
-"recommendedInstanceType": "m5.2xlarge",
-"finding": "Overprovisioned"
-```
-
-Common flags:
-
-* `"Underprovisioned"`
-* `"Overprovisioned"`
-* `"Optimized"`
+Wait 20–60 minutes for baseline CPU metrics to accumulate in CloudWatch.
 
 ---
 
-## **Step 3 — Validate Findings Using CloudWatch Metrics**
+## Step 2 — Enable Predictive Scaling
 
-```bash
-aws cloudwatch get-metric-statistics \
-  --namespace AWS/EC2 \
-  --metric-name CPUUtilization \
-  --dimensions Name=InstanceId,Value=i-12345 \
-  --statistics Average \
-  --period 300 \
-  --start-time 2025-01-01T00:00:00Z \
-  --end-time 2025-01-02T00:00:00Z
-```
+1. Go to **EC2 Console → Auto Scaling Groups**
+2. Select your ASG
+3. Go to **Automatic Scaling → Add Policy**
+4. Choose **Predictive scaling**
+5. Metric specification: **CPUUtilization**
+6. Forecasting settings:
 
-Validation criteria:
+   * Forecast data points: **48 hours**
+7. Scaling behavior:
 
-* **CPU < 20%** consistently → oversizing
-* Memory utilization < 40% (requires CW Agent)
-* Network & IO low → oversizing
+   * **Maximize availability**
+8. Cooldown: 300 seconds
+9. Save
 
-This step confirms that Compute Optimizer didn’t flag a burst anomaly incorrectly.
+Predictive scaling now begins analyzing historical data and forecasting peak times.
 
 ---
 
-## **Step 4 — Automate Rightsizing**
+## Step 3 — Monitor Predictive Scaling Behavior
 
-### **Option A — Lambda Automation**
+After activation:
 
-```python
-import boto3
+1. Go to ASG → **Activity**
+2. Look for predictions and proactive scale-out actions
+3. Go to **CloudWatch → Metrics → Auto Scaling**
+4. Open metric:
 
-ec2 = boto3.client('ec2')
+   * **Predictive scaling forecast**
 
-def lambda_handler(event, context):
-    instance_id = event["InstanceId"]
-    new_type = event["NewType"]
+You will now see two lines:
 
-    ec2.stop_instances(InstanceIds=[instance_id])
-    waiter = ec2.get_waiter('instance_stopped')
-    waiter.wait(InstanceIds=[instance_id])
+* Actual CPU consumption
+* Forecasted future demand
 
-    ec2.modify_instance_attribute(
-        InstanceId=instance_id,
-        InstanceType={'Value': new_type}
-    )
+Expected outcomes:
 
-    ec2.start_instances(InstanceIds=[instance_id])
-    return {"status": "success"}
-```
-
-Trigger via EventBridge rule linked to Compute Optimizer findings.
+* ASG scales out *before* CPU spikes
+* ASG scales in more aggressively after demand drops
+* Idle compute time decreases → cost savings
 
 ---
 
-### **Option B — SSM Automation (Standard Runbook)**
+## Step 4 — Validate Cost Improvement
 
-```bash
-aws ssm start-automation-execution \
-  --document-name AWS-ResizeInstance \
-  --parameters InstanceId=i-12345,InstanceType=m5.large
-```
+1. Go to **Cost Explorer → EC2 Instance Usage**
+2. Compare:
 
-SSM provides:
+   * Before predictive scaling
+   * After predictive scaling
 
-* Logs
-* Approval workflows
-* Versioning
-* Rollback options
+Look for:
 
----
+* Fewer unneeded scale-up events
+* Reduced On-Demand instance-hours
+* Better CPU utilization percentage
 
-## **Step 5 — Validate Post-Resize Performance**
-
-Key metrics to check:
-
-* CPU now averages **30–60%**
-* Memory steady within safe threshold
-* Network bandwidth not saturated
-* No CPU credit exhaustion (for T-series instances)
-* Latency remains stable
+Target improvement: **~30% cost reduction**
 
 ---
 
-# **Expected Optimization Outcome**
+## LAB 1 Checklist
 
-* Instance sizing improved → **20–40% compute savings**
-* Predictable performance after rightsizing
-* Automated workflows reduce operational overhead
-* Continuous compute governance across environments
+| Task                       | Done | Verified | Screenshot |
+| -------------------------- | ---- | -------- | ---------- |
+| Baseline ASG created       |      |          |            |
+| Predictive scaling enabled |      |          |            |
+| Forecast graphs observed   |      |          |            |
+| Activity logs validated    |      |          |            |
+| Cost Explorer improvements |      |          |            |
 
 ---
 
-# **Module 6 Deliverables**
+# **LAB 2 — Rightsizing Compute Using Compute Optimizer**
 
-Participants produce:
+### Objective
 
-* Working predictive scaling configuration
-* Combined predictive + target tracking policy
-* Compute Optimizer rightsizing report
-* CloudWatch metric validation insights
-* Automated rightsizing workflow (Lambda or SSM)
-* Verified compute cost reduction
+Use Compute Optimizer & CloudWatch to identify oversized instances and optimize them.
+
+---
+
+## Step 1 — Review Compute Optimizer Recommendations
+
+1. Open **Compute Optimizer Console**
+2. Select **EC2 instances**
+3. Look for categories:
+
+   * Over-provisioned
+   * Under-provisioned
+   * Optimized
+
+Select an instance from the ASG.
+
+You will see a details panel with:
+
+* Current instance type
+* Recommended instance type(s)
+* Estimated monthly savings
+* Performance risk level
+
+Example recommendation:
+
+* Current: **t3.medium**
+* Recommended: **t3.small** (40% cheaper)
+* Or: **t4g.small** (60% cheaper if ARM is supported)
+
+---
+
+## Step 2 — Validate With CloudWatch Metrics
+
+1. Open **CloudWatch Console → Metrics → EC2 → Per-Instance Metrics**
+2. Select the instance
+3. Review:
+
+   * CPUUtilization
+   * NetworkIn / NetworkOut
+   * DiskReadBytes / DiskWriteBytes
+
+Expected findings:
+
+* CPU < 20% average
+* Network low
+* Storage low
+
+This proves overprovisioning.
+
+---
+
+## Step 3 — Create an Automated Rightsizing Workflow
+
+Purpose: Automatically resize instances based on Compute Optimizer events.
+
+### Step 3A — Create EventBridge Rule
+
+1. Go to **EventBridge Console → Rules → Create rule**
+2. Name:
+
+   ```
+   AutoRightsizeRule
+   ```
+3. Event pattern:
+   Choose **AWS Services** → **Compute Optimizer** →
+   Event type: **RecommendationCreated**
+
+Save rule.
+
+### Step 3B — Create a Lambda Function (Console)
+
+1. Go to **Lambda Console → Create function**
+2. Author from scratch
+3. Name:
+
+   ```
+   AutoRightsizeEC2
+   ```
+4. Runtime: Python 3.9
+5. Role: basic Lambda permissions
+
+Paste logic (high-level workflow):
+
+* Parse recommendation
+* Modify appropriate launch template
+* Trigger ASG instance refresh
+
+Note:
+Since CLI cannot be used, the lab focuses on *workflow understanding*, not actual execution.
+
+---
+
+## Step 3C — Connect Lambda to EventBridge
+
+1. Open EventBridge rule
+2. Add target → Lambda Function → `AutoRightsizeEC2`
+3. Save configuration
+
+Now when Compute Optimizer publishes a new recommendation, the Lambda will run.
+
+---
+
+## Step 4 — Validate Automated Remediation
+
+1. Open **EventBridge → Monitoring → Recent Invocations**
+2. Confirm Lambda was triggered
+3. Open **Lambda → Monitor → Logs**
+4. Confirm recommendation was received
+
+ASG will update itself based on the automated workflow design (conceptual lab purpose).
+
+---
+
+## LAB 2 Checklist
+
+| Task                               | Done | Verified | Screenshot |
+| ---------------------------------- | ---- | -------- | ---------- |
+| Checked Compute Optimizer findings |      |          |            |
+| Validated CloudWatch metrics       |      |          |            |
+| Created EventBridge rule           |      |          |            |
+| Created Lambda function            |      |          |            |
+| Linked rule → Lambda               |      |          |            |
+| Validated automated workflow       |      |          |            |
+
+---
+
+# **Module 6 Final Challenge — Reduce Compute Cost by 30–40%**
+
+Students must combine all optimizations to produce measurable cost savings.
+
+---
+
+## Challenge Requirements
+
+### Predictive Scaling
+
+* Forecasting enabled
+* Proactive scale-out observed
+* Scaling events optimized
+
+### Rightsizing
+
+* Compute Optimizer used
+* At least one rightsizing recommendation documented
+
+### Automation Workflow
+
+* EventBridge → Lambda correction pipeline sketched
+* Trigger flow validated
+
+### Cost Improvement
+
+* Cost Explorer screenshots showing improvements
+* CPU utilization improvements
+* Fewer idle compute hours
+
+---
+
+## Deliverables
+
+### Before Optimization
+
+* ASG configuration
+* Instance type
+* CPU metrics
+* Cost Explorer baseline
+
+### After Optimization
+
+* Predictive scaling graphs
+* New ASG behavior logs
+* Rightsizing data
+* Final cost reduction summary
+
+**Goal: Achieve 30% minimum cost reduction; 40%+ results qualify for Excellence Award.**
+
+---

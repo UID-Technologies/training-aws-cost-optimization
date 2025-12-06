@@ -1,370 +1,461 @@
+
 # **Module 8 — Final Lab: Build an Automated Cost Governance Toolkit**
 
-## **Scenario Context**
+## **1. Module Overview**
 
-Acado Corp wants to implement **continuous, automated cost governance** across all AWS accounts.
-Today, engineers manually review resources, cost anomalies, and cleanup opportunities — but:
+In this final module, you will build a **lightweight, automated cost governance framework** that continuously:
 
-* Idle resources accumulate
-* Rightsizing recommendations remain unimplemented
-* Budgets and alerts are inconsistently configured
-* Orphaned snapshots and volumes grow unchecked
-* No automation ensures weekly/monthly governance
+* Monitors cloud usage
+* Detects idle or underutilized resources
+* Raises alerts proactively
+* Performs automated cleanup or rightsizing
+* Enforces budgets and spending guidelines
+* Operates using serverless, scalable AWS-native tools
 
-Engineering leadership mandates the creation of a **FinOps Automation Toolkit** that will:
-
-✔ Scan AWS accounts weekly for cost inefficiencies
-✔ Publish findings to Slack / email / dashboards
-✔ Trigger automated remediation workflows
-✔ Enforce budgets and alerts
-✔ Deploy governance tools across environments using IaC
-
-This final module transforms everything learned in Modules 1–7 into a **repeatable, automated FinOps framework.**
+This module integrates everything learned in Modules 1–7 and transforms it into a **production-ready cost governance system**.
 
 ---
 
-# **Module 8 Deliverables**
+## **2. Learning Objectives**
 
-By the end of this module, participants will build:
+You will learn to:
 
-✔ A Lambda-based resource analyzer
-✔ Budget + alerting automation
-✔ Rightsizing + resource cleanup workflows
-✔ IaC templates (Terraform/CloudFormation) for deployment
-✔ A mini **"FinOps Governance Framework"** used across environments
+### **Automated Cost Detection**
+
+* Detect idle EC2 instances
+* Identify unattached EBS volumes
+* Identify unused Elastic IPs
+* Identify idle RDS instances
+* Detect old snapshots consuming storage
+
+### **Cost Governance**
+
+* Create monthly/forecast-based AWS Budgets
+* Notify through SNS → Email or Slack
+* Monitor spend automatically
+
+### **Optimization Automation**
+
+* Event-driven rightsizing
+* Automated cleanup workflows
+* Tag governance & compliance checks
+
+### **Governance as Code**
+
+* Deploy budgets, alerts, routers, lambdas, and EventBridge rules
+  using:
+
+  * Terraform
+  * CloudFormation
 
 ---
 
-# **Lab 1 — Build a Lambda-Based Idle Resource Detector**
+## **3. Initial Setup Steps**
 
-## **Objective**
+Before starting the labs, perform these setup tasks.
 
-Develop a Lambda function that runs weekly to detect:
+### **Step 1 — Create a Governance S3 Bucket (using Windows Command Prompt + AWS CLI)**
 
-* Idle EC2 instances
-* Underutilized RDS instances
+```cmd
+aws s3 mb s3://governance-toolkit-<yourname>
+```
+
+This bucket will store:
+
+* JSON reports
+* Configuration snapshots
+* Optional logs and exported metrics
+
+### **Step 2 — Create IAM Role for Governance Lambdas**
+
+Go to the **IAM Console → Roles → Create Role**
+Select: **Lambda** as trusted entity.
+
+Attach the following policies:
+
+| Policy                         | Purpose                |
+| ------------------------------ | ---------------------- |
+| AmazonEC2ReadOnlyAccess        | Inspect EC2 resources  |
+| AmazonRDSReadOnlyAccess        | Inspect RDS databases  |
+| AmazonEC2FullAccess (optional) | Stop/delete EC2 or EBS |
+| AmazonCloudWatchLogsFullAccess | Write logs             |
+| AmazonS3FullAccess             | Export reports         |
+| AWSLambdaBasicExecutionRole    | Logging                |
+
+Role Name: **CostGovernanceLambdaRole**
+
+---
+
+# **Lab 1 — Detect Idle or Underutilized AWS Resources**
+
+## **Goal**
+
+Create a Lambda that automatically scans your AWS account for:
+
+* Idle EC2 instances (<5% CPU over 7 days)
 * Unused EBS volumes
-* Idle Load Balancers
-* Unused or low-access S3 buckets
-* Underutilized Lambda functions
-* ECS/EKS services with near-zero CPU/memory usage
+* Idle RDS instances
+* Old snapshots (>30 days)
+* Unused Elastic IPs
+
+Produces a JSON report you can save to S3 or trigger cleanup automation.
 
 ---
 
-## **Step 1 — Create IAM Role**
+## **Step-by-Step Implementation**
 
-```bash
-aws iam create-role --role-name acado-finops-role \
-  --assume-role-policy-document file://trust.json
+### **Step 1 — Write Lambda Script (Windows Command Prompt)**
+
+Create the file:
+
+```cmd
+notepad detect_idle_resources.py
 ```
 
-Attach read-only permissions:
-
-```bash
-aws iam attach-role-policy \
-  --role-name acado-finops-role \
-  --policy-arn arn:aws:iam::aws:policy/ReadOnlyAccess
-```
-
----
-
-## **Step 2 — Write the Lambda Function**
-
-`finops-detector.py`:
+Paste the script:
 
 ```python
-import boto3, datetime
+import boto3
+import datetime
 
-ec2 = boto3.client("ec2")
-cloudwatch = boto3.client("cloudwatch")
-rds = boto3.client("rds")
-elbv2 = boto3.client("elbv2")
+ec2 = boto3.client('ec2')
+cloudwatch = boto3.client('cloudwatch')
+rds = boto3.client('rds')
 
-def check_ec2_idle(instance_id):
+def get_ec2_cpu(instance_id):
     metrics = cloudwatch.get_metric_statistics(
-        Namespace="AWS/EC2",
-        MetricName="CPUUtilization",
-        Dimensions=[{"Name": "InstanceId", "Value": instance_id}],
+        Namespace='AWS/EC2',
+        MetricName='CPUUtilization',
+        Dimensions=[{'Name':'InstanceId', 'Value':instance_id}],
         StartTime=datetime.datetime.utcnow() - datetime.timedelta(days=7),
         EndTime=datetime.datetime.utcnow(),
         Period=3600,
-        Statistics=["Average"]
+        Statistics=['Average']
     )
-    datapoints = metrics.get("Datapoints", [])
-    avg = sum([p["Average"] for p in datapoints]) / (len(datapoints) or 1)
-    return avg < 5
+    dps = metrics.get('Datapoints', [])
+    if not dps:
+        return None
+    return sum(dp['Average'] for dp in dps) / len(dps)
 
 def lambda_handler(event, context):
     findings = []
 
-    # EC2
-    instances = ec2.describe_instances()
-    for r in instances["Reservations"]:
-        for inst in r["Instances"]:
-            if check_ec2_idle(inst["InstanceId"]):
-                findings.append({
-                    "type": "EC2",
-                    "resource": inst["InstanceId"],
-                    "issue": "Idle for >7 days"
-                })
+    # EC2 idle
+    for r in ec2.describe_instances()['Reservations']:
+        for inst in r['Instances']:
+            if inst['State']['Name'] == 'running':
+                cpu = get_ec2_cpu(inst['InstanceId'])
+                if cpu is not None and cpu < 5:
+                    findings.append({
+                        'resource': inst['InstanceId'],
+                        'type': 'EC2',
+                        'issue': 'Idle (CPU <5%)'
+                    })
 
-    # TODO: Add RDS, EBS, Lambda, ECS/EKS Checks
+    # EBS unattached
+    for vol in ec2.describe_volumes()['Volumes']:
+        if len(vol.get('Attachments', [])) == 0:
+            findings.append({
+                'resource': vol['VolumeId'],
+                'type': 'EBS',
+                'issue': 'Unattached volume'
+            })
 
-    return {"findings": findings}
+    # Unused Elastic IPs
+    for addr in ec2.describe_addresses()['Addresses']:
+        if 'InstanceId' not in addr:
+            findings.append({
+                'resource': addr['PublicIp'],
+                'type': 'EIP',
+                'issue': 'Unassociated Elastic IP'
+            })
+
+    # RDS idle
+    for db in rds.describe_db_instances()['DBInstances']:
+        if db['DBInstanceStatus'] == 'available':
+            findings.append({
+                'resource': db['DBInstanceIdentifier'],
+                'type': 'RDS',
+                'issue': 'Needs CPU/connection evaluation'
+            })
+
+    return findings
 ```
 
-Deploy:
+### **Step 2 — Zip & Create Lambda**
 
-```bash
-aws lambda create-function \
-  --function-name acado-finops-detector \
-  --handler finops-detector.lambda_handler \
-  --runtime python3.12 \
-  --zip-file fileb://finops.zip \
-  --role arn:aws:iam::<acc>:role/acado-finops-role
+```cmd
+powershell Compress-Archive detect_idle_resources.py function.zip
 ```
 
----
+Now deploy:
 
-## **Step 3 — Schedule Weekly Execution**
-
-```bash
-aws events put-rule \
-  --name weekly-finops-check \
-  --schedule-expression "cron(0 3 ? * MON *)"
+```cmd
+aws lambda create-function ^
+ --function-name DetectIdleResources ^
+ --runtime python3.9 ^
+ --handler detect_idle_resources.lambda_handler ^
+ --zip-file fileb://function.zip ^
+ --role <IAM_ROLE_ARN>
 ```
 
-Attach Lambda:
+### **Step 3 — Test Lambda**
 
-```bash
-aws events put-targets \
-  --rule weekly-finops-check \
-  --targets "Id"="1","Arn"="<lambda-arn>"
-```
+Go to:
 
-**Outcome:**
-A centralized “Cost Scanner” that detects weekly inefficiencies across the environment.
+**Lambda Console → DetectIdleResources → Test**
 
----
-
-# **Lab 2 — Budgets & Alerts Automation (Email / SNS / Slack)**
-
-## **Objective**
-
-Configure **automated cost alerts** that activate when forecasts exceed thresholds.
-
----
-
-## **Step 1 — Create a Monthly Budget**
-
-```bash
-aws budgets create-budget \
-  --account-id <acc> \
-  --budget file://monthly-budget.json
-```
-
-`monthly-budget.json`:
-
-```json
-{
-  "BudgetName": "Acado-Monthly-Cost",
-  "BudgetLimit": { "Amount": 5000, "Unit": "USD" },
-  "TimeUnit": "MONTHLY",
-  "BudgetType": "COST"
-}
-```
-
----
-
-## **Step 2 — Attach Alert Thresholds**
-
-```bash
-aws budgets create-notification-with-subscribers \
-  --account-id <acc> \
-  --budget-name Acado-Monthly-Cost \
-  --notification file://notify80.json \
-  --subscribers file://finops-subscribers.json
-```
-
-`notify80.json`:
-
-```json
-{
-  "NotificationType": "FORECASTED",
-  "ComparisonOperator": "GREATER_THAN",
-  "Threshold": 80
-}
-```
-
-`finops-subscribers.json`:
+Observe JSON output such as:
 
 ```json
 [
-  { "SubscriptionType": "EMAIL", "Address": "finops@acado.com" },
-  { "SubscriptionType": "SNS", "Address": "arn:aws:sns:us-east-1:123456789012:acadosns" }
+  {"resource": "i-12345", "type": "EC2", "issue": "Idle (CPU <5%)"},
+  {"resource": "vol-87654", "type": "EBS", "issue": "Unattached volume"}
 ]
 ```
 
 ---
 
-## **Step 3 — Add Slack Alert Integration**
+## **Lab 1 Checklist**
 
-Create SNS → Lambda → Slack webhook bridge:
+| Task                           | ✔ Done | 🔍 Verified | 📸 Screenshot |
+| ------------------------------ | ------ | ----------- | ------------- |
+| IAM role created               |        |             |               |
+| Lambda created & deployed      |        |             |               |
+| Test executed successfully     |        |             |               |
+| EC2/EBS/RDS/EIP flagged        |        |             |               |
+| JSON exported to S3 (optional) |        |             |               |
+
+---
+
+# **Lab 2 — Create Custom AWS Budgets & Cost Alerts**
+
+## **Goal**
+
+Set up real-time cost monitoring using AWS Budgets + SNS.
+
+---
+
+## **Step 1 — Create SNS Topic (Windows Command Prompt)**
+
+```cmd
+aws sns create-topic --name CostAlertsTopic
+```
+
+Subscribe email:
+
+```cmd
+aws sns subscribe ^
+ --topic-arn <TOPIC_ARN> ^
+ --protocol email ^
+ --notification-endpoint <your-email>
+```
+
+Verify subscription email.
+
+---
+
+## **Step 2 — Create AWS Budget (AWS Console Only)**
+
+Go to:
+
+**Billing → Budgets → Create Budget**
+
+1. Budget Type: **Cost Budget**
+2. Amount: e.g. **$50**
+3. Period: **Monthly**
+4. Alerts:
+
+   * 80% actual
+   * 100% actual
+   * 100% forecasted
+
+Choose SNS Topic → **CostAlertsTopic**
+
+---
+
+## **Lab 2 Checklist**
+
+| Task                   | ✔ Done | 🔍 Verified | 📸 Screenshot |
+| ---------------------- | ------ | ----------- | ------------- |
+| SNS topic created      |        |             |               |
+| Email confirmed        |        |             |               |
+| Budget created         |        |             |               |
+| Forecast alert created |        |             |               |
+
+---
+
+# **Lab 3 — Automated Rightsizing & Cleanup**
+
+## **Goal**
+
+Use findings from Lab 1 to automatically:
+
+* Stop idle EC2
+* Delete unattached EBS
+* Send notifications
+
+---
+
+## **Step 1 — Create Cleanup Lambda**
+
+Create file:
+
+```cmd
+notepad cleanup_resources.py
+```
+
+Paste:
 
 ```python
-import json, urllib3
-http = urllib3.PoolManager()
+import boto3
+
+ec2 = boto3.client('ec2')
 
 def lambda_handler(event, context):
-    http.request(
-        "POST",
-        "https://hooks.slack.com/services/<id>",
-        body=json.dumps({"text": json.dumps(event)}),
-        headers={"Content-Type": "application/json"}
-    )
+    findings = event.get('findings', [])
+    actions = []
+
+    for f in findings:
+        if f['type'] == 'EC2':
+            ec2.stop_instances(InstanceIds=[f['resource']])
+            actions.append(f"Stopped EC2: {f['resource']}")
+
+        if f['type'] == 'EBS':
+            ec2.delete_volume(VolumeId=f['resource'])
+            actions.append(f"Deleted EBS Volume: {f['resource']}")
+
+    return {'actions_taken': actions}
+```
+
+Zip + deploy:
+
+```cmd
+powershell Compress-Archive cleanup_resources.py cleanup.zip
+```
+
+```cmd
+aws lambda create-function ^
+ --function-name CleanupResources ^
+ --runtime python3.9 ^
+ --handler cleanup_resources.lambda_handler ^
+ --zip-file fileb://cleanup.zip ^
+ --role <IAM_ROLE_ARN>
 ```
 
 ---
 
-# **Lab 3 — Automated Rightsizing & Resource Cleanup**
+## **Step 2 — Create Scheduled Event (EventBridge)**
 
-## **Objective**
+```cmd
+aws events put-rule ^
+ --name DailyCostGovernance ^
+ --schedule-expression "cron(0 2 * * ? *)"
+```
 
-Create automation workflows to:
+Add Lambda target:
 
-* Rightsize EC2
-* Delete unused EBS volumes
-* Remove old snapshots
-* Clean up idle Load Balancers
-* Optimize Lambda memory settings
-* Identify underutilized RDS
+```cmd
+aws events put-targets ^
+ --rule DailyCostGovernance ^
+ --targets Id="1",Arn="<DetectIdleResourcesLambdaARN>"
+```
+
+(Advanced: chain CleanupResources using Step Functions.)
 
 ---
 
-## **Step 1 — Integrate Compute Optimizer**
+## **Lab 3 Checklist**
 
-```bash
-aws compute-optimizer get-ec2-instance-recommendations > reco.json
-```
-
-Use Lambda to trigger remediation via SSM or EC2 APIs.
-
----
-
-## **Step 2 — EBS Volume Cleanup**
-
-```python
-volumes = ec2.describe_volumes(Filters=[{"Name": "status", "Values": ["available"]}])
-for vol in volumes["Volumes"]:
-    ec2.delete_volume(VolumeId=vol["VolumeId"])
-```
+| Task                   | ✔ | 🔍 | 📸 |
+| ---------------------- | - | -- | -- |
+| Cleanup Lambda created |   |    |    |
+| Scheduled rule created |   |    |    |
+| Daily detection runs   |   |    |    |
+| Cleanup verified       |   |    |    |
 
 ---
 
-## **Step 3 — Remove Old Snapshots**
+# **Lab 4 — Governance as Code (Terraform or CloudFormation)**
 
-```python
-for s in ec2.describe_snapshots(OwnerIds=["self"])["Snapshots"]:
-    if s["StartTime"] < cutoff_date:
-        ec2.delete_snapshot(SnapshotId=s["SnapshotId"])
-```
+## **Goal**
 
----
+Deploy budgets, alerts, lambdas, and rules using IaC so you can:
 
-## **Step 4 — Auto-Rightsize Lambda Memory**
-
-Based on Power Tuning output:
-
-```bash
-aws lambda update-function-configuration \
-  --function-name acado-process \
-  --memory-size 1024
-```
+* Version control
+* Reuse across accounts
+* Deploy to organizations
 
 ---
 
-# **Lab 4 — Deploy the Governance Framework via IaC**
+## **Terraform Example**
 
-## **Objective**
-
-Package the FinOps automation toolkit into Infrastructure-as-Code so it can be deployed across:
-
-* Dev
-* QA
-* Staging
-* Production
-
----
-
-## **Option A — Terraform (Preferred)**
-
-### Suggested structure:
+Create folder:
 
 ```
-modules/
-  finops-lambda/
-  budgets/
-  notifier/
-  cleanup/
-environments/
-  prod/
-    main.tf
-  dev/
-    main.tf
+mkdir governance-iac
+cd governance-iac
 ```
 
-Example:
+Create `main.tf`:
 
 ```hcl
-resource "aws_lambda_function" "finops" {
-  function_name = "acado-finops-detector"
-  role          = aws_iam_role.finops_role.arn
-  handler       = "finops-detector.lambda_handler"
-  runtime       = "python3.12"
-  filename      = "finops.zip"
+provider "aws" {
+  region = "us-east-1"
+}
+
+resource "aws_sns_topic" "cost_alerts" {
+  name = "CostAlertsTopic"
+}
+
+resource "aws_budgets_budget" "monthly_cost" {
+  name         = "MonthlyCostBudget"
+  budget_type  = "COST"
+  limit_amount = "50"
+  limit_unit   = "USD"
+  time_unit    = "MONTHLY"
+
+  notification {
+    threshold = 80
+    threshold_type = "PERCENTAGE"
+    comparison_operator = "GREATER_THAN"
+    notification_type   = "ACTUAL"
+
+    subscriber {
+      subscription_type = "EMAIL"
+      address           = "your-email@example.com"
+    }
+  }
 }
 ```
 
----
+Deploy:
 
-## **Option B — CloudFormation**
-
-Create a single unified stack containing:
-
-* Lambda functions
-* EventBridge schedules
-* IAM roles
-* SNS topics
-* Budgets & notifications
+```cmd
+terraform init
+terraform apply
+```
 
 ---
 
-# **Module 8 Final Challenge — Build a Complete FinOps Automation Framework**
+## **CloudFormation Example**
 
-### **Goal:**
-
-Create a fully functional **self-running automated cost governance system**.
-
-### **Required Outcomes:**
-
-✔ Weekly idle resource report
-✔ Automated cleanup of unused assets
-✔ Automatic EC2/Lambda rightsizing
-✔ Monthly budget with alerts
-✔ Slack/email notifications
-✔ IaC-driven deployment
-✔ Estimated annual savings ≥ **30%**
+```cmd
+aws cloudformation deploy ^
+ --stack-name GovernanceToolkit ^
+ --template-file governance.yaml ^
+ --capabilities CAPABILITY_IAM
+```
 
 ---
 
-# **Module 8 Deliverables**
+## **Lab 4 Checklist**
 
-Participants successfully deliver:
+| Task                         | ✔ | 🔍 | 📸 |
+| ---------------------------- | - | -- | -- |
+| Terraform/CFN folder created |   |    |    |
+| IaC deployed                 |   |    |    |
+| Resources verified           |   |    |    |
 
-* FinOps resource analyzer Lambda
-* Budget + alert automation
-* Rightsizing + cleanup workflows
-* Terraform/CloudFormation governance stack
-* Weekly Slack/email governance summary
-* A working “Acado FinOps Governance Toolkit”
+---
 
