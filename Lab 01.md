@@ -102,6 +102,45 @@ Click **Next → Review → Complete**.
 
 CUR delivery will start; first file may take up to 24 hours.
 
+
+## Option 2: Create sample data and upload in s3
+If you want to skip waiting for CUR delivery, you can create sample CUR data and upload it to your S3 bucket.
+
+#### 1. Copy and paste the content into csv file
+```
+line_item_usage_start_date,line_item_usage_end_date,product_product_name,usage_type,line_item_unblended_cost,resource_id,resource_tags_user_costcenter,resource_tags_user_owner,resource_tags_user_environment,availability_zone,region
+2025-01-01T00:00:00Z,2025-01-01T01:00:00Z,AWS Lambda,Lambda-GB-Second,0.023,arn:aws:lambda:us-east-1:123456789012:function:processOrder,FIN001,varun,prod,us-east-1a,us-east-1
+2025-01-01T00:00:00Z,2025-01-01T01:00:00Z,Amazon EC2,BoxUsage:m5.large,0.120,i-08abc12ef34d56aa,ENG002,rahul,dev,us-east-1b,us-east-1
+2025-01-01T01:00:00Z,2025-01-01T02:00:00Z,Amazon EC2,BoxUsage:m5.xlarge,0.240,i-03aa45bc67ef981bc,ENG002,rahul,dev,us-east-1b,us-east-1
+2025-01-01T00:00:00Z,2025-01-01T01:00:00Z,Amazon S3,TimedStorage-ByteHrs,0.003,,FIN001,varun,prod,,us-east-1
+2025-01-01T02:00:00Z,2025-01-01T03:00:00Z,Amazon RDS,InstanceUsage:db.m5.large,0.350,db-XYZ123,FIN001,varun,prod,us-east-1c,us-east-1
+2025-01-01T03:00:00Z,2025-01-01T04:00:00Z,Amazon EKS,EC2-Other,0.140,i-0abc33ff45ff67de1,PLT003,amit,stage,us-east-1a,us-east-1
+2025-01-01T04:00:00Z,2025-01-01T05:00:00Z,Elastic Load Balancing,LoadBalancerUsage,0.017,app/myapp-lb/abcd1234efgh5678,FIN001,varun,prod,us-east-1a,us-east-1
+2025-01-01T04:00:00Z,2025-01-01T05:00:00Z,Amazon SQS,Requests,0.001,,PLT003,amit,stage,,us-east-1
+2025-01-01T05:00:00Z,2025-01-01T06:00:00Z,Amazon DynamoDB,WriteCapacityUnit-hrs,0.044,table/Orders,FIN001,varun,prod,us-east-1c,us-east-1
+2025-01-01T06:00:00Z,2025-01-01T07:00:00Z,AWS Lambda,Request,0.009,arn:aws:lambda:us-east-1:123456789012:function:sendEmail,ENG002,rahul,dev,us-east-1a,us-east-1
+2025-01-01T07:00:00Z,2025-01-01T08:00:00Z,Amazon EC2,BoxUsage:t3.micro,0.010,i-06cde89ff11ab3344,,priya,test,us-east-1b,us-east-1
+2025-01-01T08:00:00Z,2025-01-01T09:00:00Z,Amazon CloudWatch,Metrics,0.002,,FIN001,varun,prod,,us-east-1
+2025-01-01T09:00:00Z,2025-01-01T10:00:00Z,Amazon ECR,Storage,0.004,,PLT003,amit,stage,,us-east-1
+2025-01-01T10:00:00Z,2025-01-01T11:00:00Z,AWS Lambda,Duration,0.011,arn:aws:lambda:us-east-1:123456789012:function:generateInvoice,FIN001,varun,prod,us-east-1a,us-east-1
+
+```
+
+### Instructions: How to Use This Sample Data
+#### Step 1 — Copy the CSV above
+Paste into a local file:
+```
+cur_sample_data.csv
+```
+
+#### Step 2 — Upload to Your S3 Bucket
+Upload into:
+```
+s3://aws-cost-visibility-<yourname>/cur/
+```
+
+
+
 ---
 
 ## Step 2 — Create AWS Glue Crawler to Discover CUR Schema
