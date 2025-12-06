@@ -1,454 +1,459 @@
 
-# **MODULE 1 — Advanced AWS Cost Visibility**
 
-# **LAB 1 — Create a Custom AWS Cost & Usage Report (CUR) + Athena Analysis**
+# **Module 1 — Hands-on Deep Dive: Advanced AWS Cost Visibility**
 
----
+This module provides enterprise-level skills to build complete AWS cost transparency using the Cost & Usage Report (CUR), Athena, Glue, QuickSight, AWS Config, and AWS Cost Anomaly Detection.
 
-## **Objective**
-
-By the end of this lab, participants will:
-
-* Enable AWS Cost & Usage Report (CUR) delivery into S3
-* Build metadata with AWS Glue (Crawler + Database)
-* Query CUR using Athena to identify cost patterns
-* Analyze high-cost services, EKS pod-level cost, and Lambda cost breakdown
-
-This lab forms the foundation for all downstream cost analysis modules.
+You will perform hands-on labs to build real FinOps visibility pipelines exactly as organizations do in production.
 
 ---
 
-## **Prerequisites**
+# **1. Module Overview**
 
-### **AWS Account Requirements**
+Participants will learn to:
 
-* Billing access → **CUR permissions**
-* IAM role/user with:
+* Create and configure AWS CUR (Cost & Usage Report) — the single source of truth for AWS billing
+* Query detailed cost data using Athena
+* Build interactive dashboards using QuickSight
+* Detect untagged resources using AWS Config + Lambda
+* Simulate real anomalies using AWS Cost Anomaly Detection
+* Build a repeatable cost-governance workflow
 
-  * `s3:*`
-  * `glue:*`
-  * `athena:*`
-  * `cur:*`
-  * `billing:ViewBilling`
-
-### **Tools Needed**
-
-* AWS CLI (configured with credentials)
-* Access to AWS Console (Billing, Glue, Athena, S3)
-
-### **Initial Setup (Required Before Starting Lab)**
-
-1. Enable **Athena** in the region you will use
-2. Ensure **AWS Glue Service Role** exists:
-
-   * `AWSGlueServiceRole` (or create one)
-3. Ensure S3 bucket naming follows global uniqueness
-4. Cost Explorer enabled (recommended but not mandatory)
+This module gives you **full visibility** into where AWS costs come from and how to control them.
 
 ---
 
-## **Step 1 — Create an S3 Bucket for CUR Storage**
+# **2. Initial Setup (AWS Console Only)**
 
-CUR must be delivered to an S3 bucket.
+## Step 1 — Create an S3 Bucket for Storing CUR Files
 
-```bash
-aws s3 mb s3://acado-cur-logs-<yourname>
-```
+1. Open **S3 Console**
+2. Click **Create bucket**
+3. Bucket name:
 
-Enable versioning to track CUR file changes:
+   ```
+   aws-cost-visibility-<yourname>
+   ```
+4. Region: Keep default
+5. Disable public access (enabled by default, recommended)
+6. Click **Create bucket**
 
-```bash
-aws s3api put-bucket-versioning \
-  --bucket acado-cur-logs-<yourname> \
-  --versioning-configuration Status=Enabled
-```
-
-**Validation Check**
-
-* Go to S3 → confirm bucket exists
+Why this matters:
+CUR delivers large CSV/Parquet files; a dedicated bucket keeps billing data organized and secure.
 
 ---
 
-## **Step 2 — Configure Cost & Usage Report (CUR) in Billing Console**
+## Step 2 — Validate IAM Permissions
 
-1. Go to **AWS Console → Billing → Cost & Usage Reports**
+Make sure your user has Console permissions for:
+
+* Billing → View Billing
+* AWS Cost & Usage Reports
+* Glue
+* Athena
+* QuickSight
+* AWS Config
+* Lambda
+* EventBridge
+* Cost Explorer
+
+If not, ask your admin to attach these managed policies:
+
+* `AWSBillingReadOnlyAccess`
+* `AmazonAthenaFullAccess`
+* `AWSGlueConsoleFullAccess`
+* `AmazonQuickSightFullAccess`
+* `AWSConfigRulesFullAccess`
+* `AWSLambda_FullAccess`
+* `CloudWatchReadOnlyAccess`
+
+---
+
+# **Lab 1 — Create AWS Cost & Usage Report (CUR) and Query Using Athena**
+
+## Goal
+
+Create an end-to-end FinOps pipeline:
+CUR → S3 → Glue → Athena → SQL analysis
+
+This is the foundation for all enterprise cost governance.
+
+---
+
+## Step 1 — Create a Cost & Usage Report (Console Only)
+
+1. Open **AWS Console → Billing → Cost & Usage Reports**
 2. Click **Create report**
-3. Name it: **acado-cur-detailed**
-4. Under *Report content*, enable:
+3. Report name:
 
-   * ✔ Include resource IDs
-   * ✔ Hourly granularity
-   * ✔ GZIP compression
-5. Delivery options:
+   ```
+   EnterpriseCostReport
+   ```
+4. Select the checkbox: **Include resource IDs**
+5. Time granularity: **Hourly**
+6. Report versioning: **Overwrite existing report**
+7. Compression: **GZIP**
+8. S3 bucket:
 
-   * Choose S3 bucket: `acado-cur-logs-<yourname>`
+   * Choose the bucket you created earlier
    * Prefix: `cur/`
-6. Review → Save
 
-**Result:** CUR files begin flowing within **24 hours**.
+Click **Next → Review → Complete**.
 
-**Validation Check**
-
-* Navigate to S3 bucket after 24 hours → check for `/cur/` folder
+CUR delivery will start; first file may take up to 24 hours.
 
 ---
 
-## **Step 3 — Create Athena Metadata via AWS Glue**
+## Step 2 — Create AWS Glue Crawler to Discover CUR Schema
 
-CUR files must be cataloged for Athena queries.
+1. Open **Glue Console → Crawlers → Create crawler**
+2. Name: `cur-crawler`
+3. Data source: **S3**
+4. Select the path:
 
-### **1. Create Database**
+   ```
+   s3://aws-cost-visibility-<yourname>/cur/
+   ```
+5. IAM Role: **Create new role**
+6. Target database:
 
-```bash
-aws glue create-database --database-input "{\"Name\":\"cur_db\"}"
-```
+   * Create database: `cost_usage_db`
+7. Click **Create**
+8. Run the crawler
 
-### **2. Create Glue Crawler**
-
-```bash
-aws glue create-crawler \
-  --name acado-cur-crawler \
-  --role AWSGlueServiceRole \
-  --database-name cur_db \
-  --targets "{\"S3Targets\": [{\"Path\": \"s3://acado-cur-logs-<yourname>/cur/\"}]}"
-```
-
-Start crawler:
-
-```bash
-aws glue start-crawler --name acado-cur-crawler
-```
-
-**Validation Check**
-
-* In Glue → Databases → Tables → `acado_cur_detailed` appears
+After it completes:
+A new table will appear in Glue → Data Catalog → Tables.
 
 ---
 
-## **Step 4 — Query CUR Using Athena**
+## Step 3 — Query CUR Data Using Athena
 
-Go to **Athena Console → SQL Editor**
-Choose database → **cur_db**
-Select table → **acado_cur_detailed**
+1. Open **Athena Console → Query editor**
+2. Choose Data source: **AwsDataCatalog**
+3. Choose database: `cost_usage_db`
+4. Select the table (usually named after the CUR folder)
 
-### **Query 1 — Top 10 Most Expensive AWS Services**
+Run these FinOps queries:
+
+### Query 1 — Top AWS Services by Cost
 
 ```sql
-SELECT product_product_name,
+SELECT product_product_name AS service,
        SUM(line_item_unblended_cost) AS cost
-FROM cur_db.acado_cur_detailed
-WHERE year = 2025 AND month = 01
-GROUP BY product_product_name
-ORDER BY cost DESC
-LIMIT 10;
+FROM enterprise_cost_report
+GROUP BY 1
+ORDER BY 2 DESC;
 ```
 
----
-
-### **Query 2 — EKS Pod-Level Cost Analysis**
+### Query 2 — Cost by Resource ID
 
 ```sql
 SELECT resource_id,
        SUM(line_item_unblended_cost) AS cost
-FROM cur_db.acado_cur_detailed
-WHERE product_product_name = 'Amazon Elastic Kubernetes Service'
-GROUP BY resource_id
-ORDER BY cost DESC;
+FROM enterprise_cost_report
+WHERE line_item_unblended_cost > 0
+GROUP BY 1
+ORDER BY 2 DESC;
 ```
 
----
-
-### **Query 3 — Lambda Cost by Region & Usage Type**
+### Query 3 — Cost by Tag (cost center / owner / team)
 
 ```sql
-SELECT product_region,
-       product_usage_type,
-       SUM(line_item_unblended_cost)
-FROM cur_db.acado_cur_detailed
-WHERE product_product_name LIKE '%Lambda%'
-GROUP BY 1,2;
+SELECT resource_tags_user_costcenter AS cost_center,
+       SUM(line_item_unblended_cost) AS cost
+FROM enterprise_cost_report
+GROUP BY 1
+ORDER BY 2 DESC;
 ```
 
----
-
-## **End of LAB 1 — Expected Deliverables**
-
-✔ CUR dataset in S3
-✔ Athena database + table created via Glue
-✔ Ability to query high-cost AWS services
-✔ Pod-level and Lambda-level cost insights
+Athena now gives you full, SQL-based billing visibility.
 
 ---
 
-# **LAB 2 — Build Granular AWS Cost Dashboards with QuickSight**
+## Lab 1 Checklist
+
+| Task                             | Done | Verified | Screenshot |
+| -------------------------------- | ---- | -------- | ---------- |
+| S3 bucket created                |      |          |            |
+| CUR created successfully         |      |          |            |
+| Glue Crawler deployed            |      |          |            |
+| Table discovered in Data Catalog |      |          |            |
+| Athena queries executed          |      |          |            |
+| Top cost drivers identified      |      |          |            |
 
 ---
 
-## **Objective**
+# **Lab 2 — Build QuickSight Dashboards for Granular Cost Visibility**
 
-Build cost dashboards using QuickSight and Athena to visualize:
+## Goal
 
-* Microservice-level costs
-* Pod-level costs
-* Lambda cost distribution
-* Region-level spend
-* Tag-based cost allocation
+Create FinOps dashboards that show:
 
----
-
-## **Prerequisites**
-
-* QuickSight Enterprise enabled
-* Access to Athena & S3 from QuickSight
-* CUR dataset available via Athena (completed LAB 1)
+* Cost by service / region / account
+* Cost by Lambda / ECS / EKS / container
+* Cost by team / project / environment
+* Trend analysis
 
 ---
 
-## **Step 1 — Set Up QuickSight**
+## Step 1 — Enable QuickSight
 
-1. Open QuickSight
-2. Choose **Enterprise Edition**
-3. Enable data sources:
+1. Open **QuickSight Console**
+2. Choose **Standard Edition** (recommended, low cost)
+3. Enable access to:
 
-   * S3 bucket permissions
-   * Athena access
-
-**Validation Check**
-
-* “Athena” appears as a selectable dataset source
+   * S3 buckets
+   * Athena
 
 ---
 
-## **Step 2 — Create Athena-Based Dataset**
+## Step 2 — Import Athena Dataset into QuickSight
 
-1. Click **New Dataset → Athena**
-2. Select database: **cur_db**
-3. Select table: **acado_cur_detailed**
-4. Import as SPICE or Direct Query
+1. QuickSight → **Datasets → New Dataset**
+2. Select **Athena**
+3. Choose:
 
----
-
-## **Step 3 — Build Visualizations**
-
-### **A. Microservice / Pod Cost Breakdown**
-
-* Fields: `resource_id`, `line_item_unblended_cost`
-* Visual: **Bar Chart**
-* Filter: `resource_id contains "pod"`
+   * Database: `cost_usage_db`
+   * Table: `enterprise_cost_report`
+4. Import into SPICE (recommended)
 
 ---
 
-### **B. Lambda Cost Heatmap**
+## Step 3 — Build Visuals
 
-* Fields: `product_usage_type`, `line_item_unblended_cost`
-* Visual: **Heatmap**
+### Visual 1 — Cost by AWS Service
 
----
+* Visual type: **Bar chart**
+* X-axis: `product_product_name`
+* Value: `sum(line_item_unblended_cost)`
 
-### **C. Region-Level Cost Analysis**
+### Visual 2 — Cost by Tag (Team / Project)
 
-* Fields: `product_region`, `line_item_unblended_cost`
-* Visual: **Geospatial Map**
+* Group by tag: `resource_tags_user_team`
+* Value: cost
 
----
+### Visual 3 — Cost by Lambda Function
 
-### **D. Tag-Based Cost Allocation**
+Filter:
 
-* Fields:
+```
+product_product_name = 'AWS Lambda'
+```
 
-  * `resource_tags_user_application`
-  * `line_item_unblended_cost`
+Use field: `usage_type`
 
-Visual: **Tree Map** or **Stacked Bar Chart**
+### Visual 4 — Kubernetes / ECS Container Level Cost
 
----
+If tags exist:
 
-## **Step 4 — Publish the Dashboard**
+* `kubernetes:pod-name`
+* `kubernetes:namespace`
+* `eks:cluster-name`
 
-1. Click **Share**
-2. Assign access to **FinOps / DevOps teams**
-3. Export to PDF for monthly reporting
+Use Pivot table:
 
----
-
-# **LAB 3 — Enforce AWS Tagging Strategy Using AWS Config + Lambda**
-
----
-
-## **Objective**
-
-Automatically detect untagged or incorrectly tagged AWS resources using AWS Config and custom Lambda rules.
+* Rows: cluster → namespace → pod → container
+* Value: cost
 
 ---
 
-## **Prerequisites**
+## Step 4 — Publish Dashboard
 
-* AWS Config enabled
-* IAM Role for Config + Lambda
-* Basic Python familiarity
+1. Click **Share → Publish dashboard**
+2. Name:
 
----
-
-## **Initial Setup Required**
-
-* Create S3 bucket for Config logs:
-  `acado-config-logs-<yourname>`
-* Ensure Config Recorder is enabled
+   ```
+   Enterprise FinOps Cost Dashboard
+   ```
+3. Share with users or groups.
 
 ---
 
-## **Step 1 — Enable AWS Config**
+## Lab 2 Checklist
 
-1. Open **AWS Config**
-2. Choose:
-
-   * Record **all resource types**
-   * Delivery channel → S3 bucket: `acado-config-logs-<yourname>`
+| Task                           | Done | Verified | Screenshot |
+| ------------------------------ | ---- | -------- | ---------- |
+| QuickSight enabled             |      |          |            |
+| Dataset imported from Athena   |      |          |            |
+| Cost-by-service visual created |      |          |            |
+| Tag-based cost map created     |      |          |            |
+| Lambda cost panel built        |      |          |            |
+| Dashboard published            |      |          |            |
 
 ---
 
-## **Step 2 — Create Lambda for Tag Validation**
+# **Lab 3 — Enforce Tagging Governance (AWS Config + Lambda)**
 
-Paste into Lambda console or deploy via CLI:
+### *(Console Only — Lambda created via Console Upload)*
+
+## Goal
+
+Detect untagged resources and enforce tagging policies.
+
+---
+
+## Step 1 — Create Required-Tags AWS Config Rule
+
+1. Open **AWS Config Console → Rules → Add rule**
+2. Search: **required-tags**
+3. Required tag keys:
+
+   * `costcenter`
+   * `environment`
+   * `owner`
+4. Resource types:
+
+   * EC2 Instances
+   * EBS Volumes
+   * RDS Instances
+   * Lambda Functions
+   * S3 Buckets
+5. Save rule
+
+AWS Config will now evaluate compliance automatically.
+
+---
+
+## Step 2 — Create Tag Enforcement Lambda
+
+### Create Lambda (Console Only)
+
+1. Go to **Lambda Console → Create function**
+2. Choose **Author from scratch**
+3. Name: `TagEnforcer`
+4. Runtime: **Python 3.9**
+5. Role: Auto-generated basic execution role
+6. Create function
+
+### Paste the following code:
+
+(Latest AWS UI → Code tab → Paste code)
 
 ```python
 import json
 
 def lambda_handler(event, context):
-    invoking_event = json.loads(event['invokingEvent'])
-    configuration = invoking_event['configurationItem']
-    
-    required_tags = ["Application", "Owner", "Environment"]
-    missing = [tag for tag in required_tags 
-               if tag not in configuration.get("tags", {})]
-
-    if missing:
-        return {
-            "compliance_type": "NON_COMPLIANT",
-            "annotation": f"Missing tags: {missing}"
-        }
-
-    return {
-        "compliance_type": "COMPLIANT",
-        "annotation": "All required tags present"
-    }
+    print("Received non-compliance event:")
+    print(json.dumps(event))
+    return {"status": "processed"}
 ```
 
----
+Save and deploy.
 
-## **Step 3 — Create Custom Config Rule**
-
-1. Go to **AWS Config → Rules → Add rule**
-2. Choose **Custom Lambda Rule**
-3. Trigger type: **Configuration changes**
-4. Select Lambda function
-5. Name rule: **acado-required-tags**
+This Lambda doesn't auto-tag (lab-safe), but processes non-compliant events.
 
 ---
 
-## **Step 4 — Test the Rule**
+## Step 3 — Create EventBridge Rule to Trigger Lambda
 
-### **A. Create an Untagged EC2 Instance**
+1. Open **EventBridge Console → Rules → Create rule**
+2. Name: `TagNonComplianceRule`
+3. Event pattern:
 
-```bash
-aws ec2 run-instances \
-  --image-id ami-0abcdef \
-  --instance-type t3.micro
-```
+   * AWS service: `AWS Config`
+   * Event type: Compliance Change
+   * Compliance type: NON_COMPLIANT
+4. Target: **Lambda → TagEnforcer**
+5. Save
 
-Expected: **NON_COMPLIANT**
-
----
-
-### **B. Apply Correct Tags**
-
-```bash
-aws ec2 create-tags \
-  --resources <instance-id> \
-  --tags Key=Application,Value=Acado \
-         Key=Owner,Value=DevOps \
-         Key=Environment,Value=Prod
-```
-
-Expected: **COMPLIANT**
+Now the Lambda will run every time a resource is missing required tags.
 
 ---
 
-# **LAB 4 — Configure AWS Cost Anomaly Detection + Simulate Cost Spike**
+## Lab 3 Checklist
+
+| Task                                 | Done | Verified | Screenshot |
+| ------------------------------------ | ---- | -------- | ---------- |
+| Created required-tags Config rule    |      |          |            |
+| Evaluated resources                  |      |          |            |
+| Created TagEnforcer Lambda           |      |          |            |
+| Linked Config → EventBridge → Lambda |      |          |            |
+| Validated event flow                 |      |          |            |
 
 ---
 
-## **Objective**
+# **Lab 4 — AWS Cost Anomaly Detection + Real Simulation**
 
-Set up automated cost anomaly detection and simulate a safe anomaly to validate the detection system.
+## Goal
 
----
-
-## **Prerequisites**
-
-* IAM permissions for Billing & SNS
-* Understanding of EC2 or Lambda workloads
+Enable anomaly detection and simulate a cost spike to test automated alerting.
 
 ---
 
-## **Step 1 — Create Cost Anomaly Monitor**
+## Step 1 — Enable Cost Anomaly Detection
 
-1. Open **Billing → Cost Anomaly Detection**
-2. Click **Create Monitor**
+1. Open **Cost Explorer → Anomaly Detection**
+2. Click **Create alert monitor**
 3. Choose:
 
-   * **Service Monitor** (recommended)
-4. Set threshold: **>$10 daily anomaly**
-5. Add SNS/email alerts
+   * **AWS Service Monitor** (recommended)
+4. Add email or SNS notifications
+5. Save
 
 ---
 
-## **Step 2 — Simulate a Safe Cost Spike**
+## Step 2 — Create Individual Monitors
 
-### **Option A — Start multiple EC2 instances**
+Examples:
 
-```bash
-aws ec2 run-instances \
-  --image-id ami-0abcdef \
-  --instance-type t3.micro \
-  --count 5
-```
+* EC2 cost monitor
+* EKS cost monitor
+* S3 data transfer cost monitor
+* Lambda usage monitor
 
-### **Option B — Invoke a Lambda many times**
-
-```bash
-for i in {1..5000}; do
-  aws lambda invoke \
-    --function-name MyFn \
-    --payload '{}' out.txt > /dev/null
-done
-```
-
-**Wait 4–6 hours for anomaly detection.**
+This gives service-level FinOps visibility.
 
 ---
 
-## **Step 3 — Analyze the Anomaly**
+## Step 3 — Simulate a Cost Anomaly
 
-Use Athena or Cost Explorer:
+Examples:
 
-```sql
-SELECT product_service_code,
-       SUM(unblended_cost) AS cost
-FROM cost_and_usage
-WHERE usage_date = CURRENT_DATE - 1
-GROUP BY product_service_code
-ORDER BY cost DESC;
-```
+* Start an EC2 instance temporarily
+* Trigger multiple Lambda invocations
+* Upload large data to S3
+* Increase RDS connections
+
+AWS will detect unusual daily spend compared to historical baseline.
 
 ---
 
-# **Module 1 — Final Deliverables**
+## Step 4 — Review the Detected Anomaly
 
-Participants complete:
+1. Open **Cost Explorer → Anomaly Detection**
+2. Click **Alerts**
+3. Review:
 
-* CUR → Athena pipeline
-* Multi-dimensional cost dashboards
-* Tag governance automation via AWS Config
-* Cost anomaly detection workflow
-* Validation of anomalies
+   * Root cause
+   * Impacted resources
+   * Estimated additional spend
+   * Suggested actions
+
+---
+
+## Lab 4 Checklist
+
+| Task                     | Done | Verified | Screenshot |
+| ------------------------ | ---- | -------- | ---------- |
+| Created anomaly monitors |      |          |            |
+| Configured alerts        |      |          |            |
+| Simulated cost anomaly   |      |          |            |
+| Received alert           |      |          |            |
+| Reviewed anomaly report  |      |          |            |
+
+---
+
+# **Final Deliverables for Module 1**
+
+Participants submit:
+
+| Deliverable                           | Completed |
+| ------------------------------------- | --------- |
+| Athena CUR query results              |           |
+| QuickSight dashboard                  |           |
+| Tag governance rule + Lambda workflow |           |
+| Anomaly simulation results            |           |
+| Summary of top 5 AWS cost drivers     |           |
+
+---
+

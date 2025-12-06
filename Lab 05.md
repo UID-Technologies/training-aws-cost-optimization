@@ -1,395 +1,518 @@
-# **Module 5 — Storage & Data Transfer Optimization Lab**
 
-## **Scenario Context**
+# **Module 5 — Storage & Data Transfer Optimization**
 
-Acado Corp handles large-scale data ingestion pipelines, distributing logs, media, AI training datasets, and analytics snapshots across S3. A recent audit revealed:
+This module teaches participants how to reduce AWS storage and data transfer costs, using real best practices applied in large-scale cloud environments.
 
-* Huge amounts of cold data stored in **S3 Standard**
-* No lifecycle rules for archival or cleanup
-* High **inter-AZ and cross-region data transfer costs**
-* Public S3 access causing **internet egress** charges
-* Analytics workloads downloading unnecessary multi-GB datasets
-* Services not using VPC endpoints or PrivateLink
+You will work with:
 
-### **Goal:**
+* Amazon S3
+* Glacier & Deep Archive
+* CloudWatch Logs
+* VPC Flow Logs
+* PrivateLink (Interface Endpoints)
+* Load Balancers
+* EC2 test resources
 
-Reduce storage and data transfer cost by **30–60%** through lifecycle automation, intelligent tiering, flow log diagnostics, and VPC-PrivateLink architecture.
-
-This module includes **four hands-on labs + a final challenge**.
+No CLI is used — every step is performed through the **AWS Console**.
 
 ---
 
-## **Module Prerequisites**
+# **1. Module Overview**
 
-### **AWS Account Requirements**
+Participants will learn how to:
 
-* IAM permissions:
-  `s3:*`, `logs:*`, `ec2:*`, `cloudwatch:*`, `vpc:*`
-* Billing access (read-only)
-* AWS CLI configured
-* Ability to create VPC, S3 buckets, endpoints
-
-### **Services that must exist (or be created during lab)**
-
-* An S3 bucket: `acado-data-prod`
-* A VPC with at least 2 subnets and route tables
-* Existing workloads accessing S3 or APIs (for flow log analysis)
+* Identify and optimize unnecessary S3 storage cost
+* Configure Intelligent-Tiering
+* Configure Lifecycle rules (transition → Glacier → Deep Archive → expiration)
+* Diagnose high NAT Gateway, public Internet, and cross-AZ network transfer charges
+* Implement PrivateLink (Interface Endpoints) to eliminate egress and NAT charges
+* Design an optimized storage + network architecture achieving 40%+ savings
 
 ---
 
-## **Initial Setup (Recommended)**
+# **2. Learning Objectives**
 
-Before starting the labs:
+By the end of this module, you will be able to:
 
-1. Ensure VPC Flow Logs IAM Role exists.
-2. Have sample files to upload to S3.
-3. Create a simple internal API (API Gateway/Lambda) for PrivateLink lab.
-4. Enable CloudWatch Logs Insights for querying network logs.
+### Optimize S3 storage
 
----
+* Enable Intelligent-Tiering at bucket level
+* Apply Lifecycle rules for archival and expiration
+* Understand cost trade-offs between S3 Standard, IA, One Zone, Glacier, Glacier Deep Archive
 
-# **Lab 1 — S3 Intelligent-Tiering Automation**
+### Diagnose high data transfer spend
 
-## **Objective**
+* Use VPC Flow Logs to see internal/external traffic
+* Use CloudWatch Logs Insights to identify traffic from NAT Gateways, Internet egress, or cross-AZ flows
 
-Automatically optimize S3 storage cost using **Intelligent-Tiering**, ensuring all new and existing objects transition without changing application code.
+### Build PrivateLink architectures
 
----
+* Create Network Load Balancer for private service exposure
+* Create Endpoint Service (provider)
+* Create Interface Endpoint (consumer)
+* Understand cost reduction impact
 
-## **Lab Prerequisites**
+### Perform full architecture optimization
 
-* S3 bucket: `acado-data-prod`
-* Lifecycle permissions
-* S3 read/write IAM permissions
-
----
-
-## **Step 1 — Check Current Storage Class**
-
-```bash
-aws s3api get-bucket-location --bucket acado-data-prod
-```
+* Redesign workloads to minimize storage + data transfer cost
 
 ---
 
-## **Step 2 — Apply Intelligent-Tiering to Existing Objects**
+# **3. Initial Setup (Console-Only)**
 
-```bash
-aws s3 cp s3://acado-data-prod s3://acado-data-prod \
-  --recursive \
-  --storage-class INTELLIGENT_TIERING
-```
+Before starting the labs, perform the following:
 
----
+## Step 1 — Create an S3 Bucket for Testing
 
-## **Step 3 — Enable Intelligent-Tiering via Lifecycle Rule** *(recommended)*
+1. Open **S3 Console → Create Bucket**
+2. Bucket name:
 
-Create **intelligent-tiering-rule.json**:
+   ```
+   storage-optimization-lab-<yourname>
+   ```
+3. Leave public access blocked
+4. Click **Create bucket**
 
-```json
-{
-  "Rules": [
-    {
-      "ID": "MoveToIntelligentTiering",
-      "Prefix": "",
-      "Status": "Enabled",
-      "Transitions": [
-        {
-          "Days": 0,
-          "StorageClass": "INTELLIGENT_TIERING"
-        }
-      ]
-    }
-  ]
-}
-```
+## Step 2 — Upload Sample Files
 
-Apply the rule:
+1. Open your S3 bucket
+2. Click **Upload**
+3. Add any local files (for lab purposes):
 
-```bash
-aws s3api put-bucket-lifecycle-configuration \
-  --bucket acado-data-prod \
-  --lifecycle-configuration file://intelligent-tiering-rule.json
-```
+   * 50–100 MB logs
+   * Several images
+   * Application artifacts
+4. Click **Upload**
+
+## Step 3 — Confirm You Have a Working VPC
+
+Use **default VPC** (recommended for labs).
+No action needed unless your account has VPC disabled.
 
 ---
 
-## **Validation**
+# **S3 LAB 1 — Intelligent-Tiering Optimization**
 
-```bash
-aws s3api get-bucket-lifecycle-configuration \
-  --bucket acado-data-prod
-```
+## Goal
 
-**Outcome:**
-All S3 data dynamically and automatically transitions between tiers, reducing cost by **20–40%**.
+Enable S3 Intelligent-Tiering for automatic cost reduction on objects with unpredictable access patterns.
 
----
+### Why this matters:
 
-# **Lab 2 — Glacier Deep Archive Lifecycle Policies**
-
-## **Objective**
-
-Automate long-term archival of data (e.g., logs older than 90 days) into **Glacier Deep Archive** for ~95% cost savings.
+Intelligent-Tiering automatically moves objects between **Frequent**, **Infrequent**, **Archive Access**, and **Deep Archive Access** tiers based on real usage.
 
 ---
 
-## **Lab Prerequisites**
+## Step 1 — Convert Existing Objects to Intelligent-Tiering
 
-* Lifecycle permission on S3
-* Data available for archival testing
+1. Open **S3 Console**
+2. Open bucket: `storage-optimization-lab-<yourname>`
+3. Select an object (e.g., log file or image)
+4. Click **Actions → Change storage class**
+5. Select **Intelligent-Tiering**
+6. Save changes
 
----
-
-## **Step 1 — Create a Lifecycle Policy**
-
-Create **glacier-lifecycle.json**:
-
-```json
-{
-  "Rules": [
-    {
-      "ID": "ArchiveOldFiles",
-      "Prefix": "",
-      "Status": "Enabled",
-      "Transitions": [
-        {
-          "Days": 90,
-          "StorageClass": "DEEP_ARCHIVE"
-        }
-      ]
-    }
-  ]
-}
-```
-
-Apply:
-
-```bash
-aws s3api put-bucket-lifecycle-configuration \
-  --bucket acado-data-prod \
-  --lifecycle-configuration file://glacier-lifecycle.json
-```
+This immediately moves the object into the Intelligent-Tiering monitoring state.
 
 ---
 
-## **Step 2 — Validate Policy**
+## Step 2 — Configure Automatic Intelligent-Tiering for the Entire Bucket
 
-```bash
-aws s3api get-bucket-lifecycle-configuration \
-  --bucket acado-data-prod
-```
+1. Open the bucket
+2. Go to **Management → Lifecycle rules → Create lifecycle rule**
+3. Rule name:
 
----
+   ```
+   intelligent-tiering-auto
+   ```
+4. Rule scope: **This bucket**
+5. Choose **Transition to Intelligent-Tiering**
+6. Configure:
 
-## **Step 3 — Test Archival Behavior**
+   * Move to **Intelligent-Tiering** after **1 day**
+7. Leave expiration disabled
+8. Click **Create rule**
 
-Upload file:
-
-```bash
-echo "sample" > test.txt
-aws s3 cp test.txt s3://acado-data-prod/archives/test.txt
-```
-
-Lifecycle will move objects automatically based on rules.
-
-**Outcome:**
-Ultra-cold data is automatically archived to **Deep Archive**, reducing storage cost drastically.
+All future uploads will automatically enter Intelligent-Tiering.
 
 ---
 
-# **Lab 3 — Diagnose High Data Transfer Costs Using CloudWatch & VPC Flow Logs**
+## Step 3 — Verify Tier Behavior (24–48 hours)
 
-## **Objective**
+After one day:
 
-Identify costly inter-AZ, cross-region, and internet-based data transfers using Flow Logs and CloudWatch Insights.
+1. Open object → **Properties**
+2. Check **Storage Class**
 
----
+   * Should show:
+     `INTELLIGENT_TIERING` → Frequent Access
+3. After inactivity:
 
-## **Lab Prerequisites**
-
-* VPC with Flow Logs enabled
-* IAM Role for FlowLogs
-* CloudWatch Logs Insights access
-
----
-
-## **Step 1 — Enable VPC Flow Logs**
-
-```bash
-aws ec2 create-flow-logs \
-  --resource-type VPC \
-  --resource-ids vpc-123abc \
-  --traffic-type ALL \
-  --log-group-name acado-vpc-flow-logs \
-  --deliver-logs-permission-arn arn:aws:iam::<acc>:role/FlowLogsRole
-```
+   * Automatically transitions to **Infrequent** or **Archive Access** tiers
 
 ---
 
-## **Step 2 — Analyze Data Egress (Internet Charges)**
+## S3 LAB 1 Checklist
+
+| Task                                       | Done | Verified | Screenshot |
+| ------------------------------------------ | ---- | -------- | ---------- |
+| Converted objects to Intelligent-Tiering   |      |          |            |
+| Created Intelligent-Tiering lifecycle rule |      |          |            |
+| Verified transition in object metadata     |      |          |            |
+
+---
+
+# **S3 LAB 2 — Lifecycle Policy for Glacier + Deep Archive**
+
+## Goal
+
+Create lifecycle rules to automatically archive old data into S3 Glacier and Glacier Deep Archive.
+
+### Why this matters:
+
+Deep Archive costs **up to 90% less** than S3 Standard and is ideal for logs, backups, and compliance storage.
+
+---
+
+## Step 1 — Create Lifecycle Archival Rule
+
+1. Go to **S3 → Bucket → Management → Lifecycle rules → Create rule**
+2. Rule name:
+
+   ```
+   archive-deepglacier
+   ```
+
+### Rule Settings:
+
+* Filter: Prefix =
+
+  ```
+  oldfiles/
+  ```
+* Transition actions:
+
+  * Move to **Glacier Flexible Retrieval** after **30 days**
+  * Move to **Glacier Deep Archive** after **90 days**
+* Expiration (optional):
+
+  * Delete objects after **1 year**
+
+3. Click **Create rule**
+
+---
+
+## Step 2 — Prepare Test Data
+
+1. Create folder in the bucket: `oldfiles/`
+2. Upload sample files into it
+
+Lifecycle rules will apply automatically.
+
+---
+
+## Step 3 — Validate Transition (Post-Delay)
+
+After 30+ days (or fast-forward in production):
+
+* Objects' **Storage Class** changes accordingly
+* You can simulate viewing transition expectation via UI
+
+---
+
+## S3 LAB 2 Checklist
+
+| Task                                            | Done | Verified | Screenshot |
+| ----------------------------------------------- | ---- | -------- | ---------- |
+| Created lifecycle rule for Glacier/Deep Archive |      |          |            |
+| Uploaded test files to oldfiles/                |      |          |            |
+| Verified lifecycle policy future transitions    |      |          |            |
+
+---
+
+# **LAB 3 — Diagnose High Data Transfer Costs Using VPC Flow Logs & CloudWatch**
+
+## Goal
+
+Learn how to find the root cause behind NAT Gateway charges, Internet data transfer, and cross-AZ traffic.
+
+### Why this matters:
+
+Many AWS bills explode because of:
+
+* NAT Gateway processing fees
+* Egress to the Internet
+* Cross-AZ inter-service communication
+* Accessing S3 via public IP instead of a VPC endpoint
+
+---
+
+## Step 1 — Enable VPC Flow Logs
+
+1. Go to **VPC Console → Your VPCs**
+2. Select the **default VPC**
+3. Click **Create flow log**
+4. Settings:
+
+   * Filter: **ALL**
+   * Destination: **CloudWatch Logs**
+   * Log Group Name: `/vpc/flowlogs`
+5. Click **Create flow log**
+
+Flow Logs now capture all network traffic metadata.
+
+---
+
+## Step 2 — Generate Some Traffic (Optional)
+
+1. Launch any EC2 instance (t2.micro) in a public subnet
+2. SSH into EC2 (or Access using SSM Session Manager)
+3. Run commands such as:
+
+   * Browsing external APIs
+   * Downloading files
+   * Calling S3
+
+This creates traffic entries that appear in VPC Flow Logs.
+
+---
+
+## Step 3 — Analyze Flow Logs Using CloudWatch Logs Insights
+
+1. Open **CloudWatch → Logs Insights**
+2. Select Log Group: `/vpc/flowlogs`
+3. Run query to identify highest traffic sources:
 
 ```sql
-fields @timestamp, srcAddr, dstAddr, bytes
-| filter dstAddr != "10.*"
-| stats sum(bytes) as TotalEgressBytes by srcAddr
-| sort TotalEgressBytes desc
+fields srcAddr, dstAddr, bytes
+| sort bytes desc
+| limit 20
 ```
 
-**Identifies:**
-→ EC2/Lambda/EKS workloads sending data outside the VPC = INTERNET EGRESS COST.
-
----
-
-## **Step 3 — Detect Cross-AZ Charges**
+To diagnose NAT Gateway traffic:
 
 ```sql
-fields @timestamp, srcAz, dstAz, bytes
-| filter srcAz != dstAz
-| stats sum(bytes) as CrossAZTransferBytes by srcAz, dstAz
+fields srcAddr, dstAddr, bytes
+| filter dstAddr like /^52\./
+| sort bytes desc
 ```
 
-**Identifies:**
-→ AWS services causing inter-AZ transfer (e.g., EKS nodes, RDS, S3 writes).
+### Interpretation:
+
+* `dstAddr` beginning with **52.x.x.x** → AWS public endpoints
+* Very high bytes → expensive NAT Gateway data processing
+* Non-RFC1918 IPs → Internet egress
 
 ---
 
-## **Step 4 — Identify S3 Transfer Hotspots**
+## Step 4 — Identify Cost Issues
 
-```sql
-fields @timestamp, dstAddr, bytes
-| filter dstAddr like /amazonaws.com/
-| stats sum(bytes) by dstAddr
+Possible findings:
+
+### NAT Gateway overuse
+
+EC2 instances pulling data from Internet or AWS services without VPC endpoints.
+
+### Cross-AZ communication
+
+If two services in different AZs talk to each other → cross-AZ cost accumulates.
+
+### Public Egress to S3
+
+Happens when:
+
+* No S3 VPC endpoint exists
+* Or application uses S3 public URLs
+
+These must be corrected in architecture.
+
+---
+
+## LAB 3 Checklist
+
+| Task                                             | Done | Verified | Screenshot |
+| ------------------------------------------------ | ---- | -------- | ---------- |
+| Enabled VPC Flow Logs                            |      |          |            |
+| Ran CloudWatch Logs Insights queries             |      |          |            |
+| Identified high-volume traffic sources           |      |          |            |
+| Identified NAT / Internet / cross-AZ root causes |      |          |            |
+
+---
+
+# **LAB 4 — Build PrivateLink Architecture (Console-Only)**
+
+### *(No CLI. 100% Console Steps)*
+
+## Goal
+
+Create PrivateLink connection between two VPCs (provider → consumer) using only the AWS Console.
+
+### Why PrivateLink?
+
+* Eliminates **Internet egress cost**
+* Eliminates **NAT Gateway charges**
+* Eliminates **cross-AZ transfer** when properly deployed
+* Provides **secure, private connectivity**
+
+---
+
+## Step 1 — Launch Provider EC2 Instance
+
+1. Open **EC2 Console → Launch instance**
+2. Name: `PrivateLinkProvider`
+3. AMI: Amazon Linux 2
+4. Instance type: t3.micro
+5. Network: default VPC
+6. Security group:
+
+   * Allow inbound **TCP 80** from VPC CIDR
+7. Launch instance
+
+## Step 2 — Install Simple Web Server on Provider EC2
+
+1. EC2 → Connect → **Session Manager**
+2. Run:
+
+   ```
+   sudo yum install -y httpd
+   echo "PrivateLink Test" | sudo tee /var/www/html/index.html
+   sudo systemctl enable httpd
+   sudo systemctl start httpd
+   ```
+
+---
+
+## Step 3 — Create a Network Load Balancer (NLB)
+
+1. EC2 Console → **Load Balancers → Create load balancer**
+2. Choose: **Network Load Balancer**
+3. Scheme: **Internal**
+4. Listeners:
+
+   * TCP 80
+5. Create Target Group:
+
+   * Type: Instance
+   * Protocol: TCP 80
+   * Register your EC2 instance
+6. Create Load Balancer
+
+---
+
+## Step 4 — Create a VPC Endpoint Service (Provider)
+
+1. Open **VPC Console → Endpoint Services**
+2. Click **Create endpoint service**
+3. Select **Your NLB**
+4. Check: “Require acceptance for endpoint requests”
+5. Create service
+
+Copy the **Service Name** — needed for consumer.
+
+---
+
+## Step 5 — Create a VPC Interface Endpoint (Consumer)
+
+1. Open **VPC Console → Endpoints → Create Endpoint**
+2. Select **Other endpoint service**
+3. Paste the Service Name
+4. Select a VPC and subnet
+5. Enable:
+
+   * **Private DNS**
+   * **Security groups** allowing port 80
+6. Create endpoint
+
+Accept the endpoint connection in Provider account (if asked).
+
+---
+
+## Step 6 — Validate PrivateLink Connectivity
+
+In consumer VPC:
+
+1. Launch EC2 instance
+2. Connect via Session Manager
+3. Run:
+
+   ```
+   curl http://<privatelink-dns>
+   ```
+
+Expected output:
+
+```
+PrivateLink Test
 ```
 
-If requests hit public S3 endpoints → high egress charges.
+This traffic:
+
+* Does NOT go to the Internet
+* Does NOT use NAT Gateway
+* Does NOT generate cross-AZ cost (if endpoints placed in same AZ)
 
 ---
 
-# **Lab 4 — Build a PrivateLink Architecture to Eliminate Data Transfer Costs**
+## LAB 4 Checklist
 
-## **Objective**
-
-Use S3 and API PrivateLink to create **fully private data paths**, eliminating NAT Gateway, inter-AZ, and public egress charges.
-
----
-
-## **Lab Prerequisites**
-
-* VPC with subnets
-* Route tables
-* API Gateway or internal service to expose
-* IAM permissions to create VPC endpoints
+| Task                           | Done | Verified | Screenshot |
+| ------------------------------ | ---- | -------- | ---------- |
+| Launched provider EC2 instance |      |          |            |
+| Created NLB                    |      |          |            |
+| Created Endpoint Service       |      |          |            |
+| Created Interface Endpoint     |      |          |            |
+| Validated PrivateLink access   |      |          |            |
 
 ---
 
-## **Step 1 — Create an S3 Gateway Endpoint**
+# **Final Module 5 Challenge — Achieve 40% Storage + Data Transfer Cost Reduction**
 
-```bash
-aws ec2 create-vpc-endpoint \
-  --vpc-id vpc-123abc \
-  --service-name com.amazonaws.us-east-1.s3 \
-  --route-table-ids rtb-111aaa rtb-222bbb
-```
-
-**Benefits:**
-✔ No NAT required
-✔ No public traffic
-✔ Zero egress fees for S3 access
+Participants must redesign an existing architecture and demonstrate measurable cost improvements.
 
 ---
 
-## **Step 2 — Create an Interface Endpoint (PrivateLink) for Internal APIs**
+## Your Objectives
 
-```bash
-aws ec2 create-vpc-endpoint \
-  --vpc-id vpc-123abc \
-  --service-name com.amazonaws.vpce.us-east-1.vpce-svc-<id> \
-  --vpc-endpoint-type Interface \
-  --subnet-ids subnet-001 subnet-002 \
-  --security-group-ids sg-123
-```
+### S3 Savings
 
-Use cases:
+* Move active data to Intelligent-Tiering
+* Archive cold data to Glacier / Deep Archive
+* Expire old logs
 
-* Lambda → internal microservices
-* EC2/ECS → private APIs
-* EKS → Amazon services
+### Network Savings
+
+* Replace NAT Gateway traffic with VPC Endpoints or PrivateLink
+* Reduce cross-AZ chatter
+* Remove Internet egress patterns
 
 ---
 
-## **Step 3 — Validate Routing**
+## Deliverables
 
-Verify DNS resolution:
+### S3 Optimization Deliverables:
 
-```bash
-dig myapi.internal
-```
+* Before vs after storage class distribution
+* Lifecycle rules screenshots
+* Intelligent-Tiering evidence
 
-Confirm:
+### Data Transfer Diagnostics:
 
-* No public IP
-* Traffic flows only via VPC endpoints
-* No cross-region hops
+* CloudWatch Insights screenshots
+* Identified root causes
+* Proposed architectural fix
 
----
+### PrivateLink Redesign:
 
-## **Step 4 — Compare Costs (Before vs After)**
+* Architecture diagram
+* Endpoint Service screenshot
+* Interface Endpoint screenshot
+* Validation test output
 
-### Without PrivateLink:
+### Final Savings Report:
 
-* Internet egress
-* NAT Gateway charges
-* Inter-AZ transfer
-
-### With PrivateLink:
-
-* Zero NAT charges
-* Zero egress for S3/API
-* Controlled AZ-local access
-
-**Expected Savings:** 30–50%
+* Storage savings %
+* NAT/Data transfer savings %
+* Total savings >= 40%
 
 ---
-
-# **Module 5 — Storage & Data Transfer Optimization Challenge**
-
-### **Goal**
-
-Optimize the given multi-stage S3 + compute pipeline to reduce **≥40% cost**.
-
-### **Pipeline Includes**
-
-* S3 raw logs
-* S3 → Lambda → S3 ETL
-* EKS/EC2 analytics queries
-* Cross-region replication
-* Public S3 access patterns
-
-### **Allowed Actions**
-
-✔ Intelligent-Tiering
-✔ Lifecycle Deep Archive
-✔ PrivateLink for S3 & API Gateway
-✔ Minimize cross-AZ traffic
-✔ Avoid public endpoints
-
-### **Success Criteria**
-
-* All workloads operate correctly
-* No performance degradation
-* Cost reduction ≥ 40%
-* Validate using CUR + Flow Logs + CloudWatch metrics
-
----
-
-# **Module 5 Deliverables**
-
-Participants complete:
-
-* Intelligent-Tiering automation
-* Deep Archive lifecycle governance
-* Flow Logs + CloudWatch cost diagnostics
-* End-to-end PrivateLink architecture implementation
-* Final 40% optimization challenge
 
