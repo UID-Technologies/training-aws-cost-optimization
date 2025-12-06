@@ -111,7 +111,7 @@ In the Code Editor:
 Replace code with:
 
 ```javascript
-export const handler = async () => {
+export const handler = async (event) => {
   const start = Date.now();
 
   let total = 0;
@@ -120,7 +120,16 @@ export const handler = async () => {
   }
 
   const duration = Date.now() - start;
-  const cost = 0; // placeholder
+  
+  // MB to GB
+  const memoryGB = event.power / 1024;
+  
+  // ms to seconds
+  const durationSeconds = duration / 1000;
+
+  const pricePerGBSecond = 0.0000166667;
+
+  const cost = durationSeconds * memoryGB * pricePerGBSecond;
 
   return {
     value: total,
@@ -128,6 +137,7 @@ export const handler = async () => {
     cost
   };
 };
+
 
 
 ```
