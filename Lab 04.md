@@ -111,16 +111,16 @@ In the Code Editor:
 Replace code with:
 
 ```javascript
-exports.handler = async () => {
-    let total = 0;
-    for (let i = 0; i < 30_000_000; i++) {
-        total += i;
-    }
-    return {
-        statusCode: 200,
-        body: JSON.stringify({ total })
-    };
+export const handler = async () => {
+  let total = 0;
+  for (let i = 0; i < 30000000; i++) {
+    total += i;
+  }
+  return {
+    value: total
+  };
 };
+
 ```
 
 Click **Deploy**.
