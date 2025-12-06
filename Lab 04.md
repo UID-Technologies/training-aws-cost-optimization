@@ -377,6 +377,17 @@ export const handler = async (event) => {
 
 Click **Deploy**
 
+For Testing send this output
+```
+{
+  "Records": [
+    {
+      "body": "task1"
+    }
+  ]
+}
+```
+
 ---
 
 ## **Step 3 — Add SQS Trigger**
