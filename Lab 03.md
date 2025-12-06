@@ -163,8 +163,8 @@ Expect significant over-provisioning.
 
 ### **Step 4 — Create Rightsized Revision**
 
-* CPU: **128**
-* Memory: **256**
+* CPU: **128**  or **.25 vCPU**
+* Memory: **256**  or  **0.5 GB**
   Update service to new revision.
 
 ---
