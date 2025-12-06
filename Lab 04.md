@@ -112,14 +112,23 @@ Replace code with:
 
 ```javascript
 export const handler = async () => {
+  const start = Date.now();
+
   let total = 0;
   for (let i = 0; i < 30000000; i++) {
     total += i;
   }
+
+  const duration = Date.now() - start;
+  const cost = 0; // placeholder
+
   return {
-    value: total
+    value: total,
+    duration,
+    cost
   };
 };
+
 
 ```
 
